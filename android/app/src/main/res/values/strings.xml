@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Gym Lift Track</string>
+    <string name="title_activity_main">Gym Lift Track</string>
+    <string name="package_name">com.gym.lift.track</string>
+    <string name="custom_url_scheme">com.gym.lift.track</string>
+    <string name="server_client_id">40150413250-b37nnttausajrvv4fccf8bmfnl1eoc92.apps.googleusercontent.com</string>
+</resources>

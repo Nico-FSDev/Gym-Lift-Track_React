@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      window.addEventListener('error', function(event) {
+        if (typeof event.message === 'string' && event.message.includes('Script error.')) {
+          event.stopImmediatePropagation();
+        }
+      }, true);
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <link rel="icon" type="image/png" href="/Gym-Lift-Track_Icon.png" />
+    <link rel="apple-touch-icon" href="/Gym-Lift-Track_Icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
+    <title>Gym Lift Track</title>
+    <meta name="description" content="Your ultimate strength & bodybuilding track log, built with dynamic machine baseline calculations and interactive progression visualization." />
+    <meta property="og:title" content="Gym Lift Track" />
+    <meta property="og:description" content="Your ultimate strength & bodybuilding track log, built with dynamic machine baseline calculations and interactive progression visualization." />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

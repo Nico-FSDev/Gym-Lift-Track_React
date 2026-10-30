@@ -1,0 +1,6 @@
+{
+  "name": "Gym Lift Track",
+  "description": "Your ultimate strength & bodybuilding track log, built with dynamic machine baseline calculations and interactive progression visualization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+             request.auth.token.email_verified == true &&
+             (request.auth.token.email == "n.lohberger.pro@gmail.com" || request.auth.token.email == "lohbergerscholar@gmail.com");
+    }
+
+    function isValidWorkoutSet(data) {
+      let hasRequired = data.keys().hasAll(['userId', 'exercise', 'date', 'reps', 'weightLbs', 'weightKg']);
+      
+      let typesValid = data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+                       data.exercise is string && data.exercise.size() > 0 && data.exercise.size() <= 100 &&
+                       data.date is timestamp &&
+                       data.reps is number &&
+                       data.weightLbs is number &&
+                       data.weightKg is number &&
+                       (!('createdAt' in data) || data.createdAt == null || data.createdAt is timestamp) &&
+                       (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is timestamp);
+                       
+      let optionalValid = (!('degrees' in data) || data.degrees == null || (data.degrees is number)) &&
+                          (!('variant' in data) || data.variant == null || (data.variant is string && data.variant.size() <= 100)) &&
+                          (!('posture' in data) || data.posture == null || (data.posture is string && data.posture.size() <= 100)) &&
+                          (!('weightModifier' in data) || data.weightModifier == null || (data.weightModifier is number)) &&
+                          (!('customFields' in data) || data.customFields == null || (data.customFields is map));
+      
+      return hasRequired && typesValid && optionalValid && data.userId == request.auth.uid;
+    }
+
+    function isValidMachineConfig(data) {
+      let hasRequired = data.keys().hasAll(['userId', 'exercise', 'baseWeightLbs', 'baseWeightKg', 'createdAt', 'updatedAt']);
+      // Since map.keys() returns a list which doesn't support hasOnly, we use exact size checking of keys
+      // 6 required fields, plus up to 4 optional fields (brand, category, variantCategories, type)
+      let expectedSize = 6 
+        + (('brand' in data) ? 1 : 0) 
+        + (('category' in data) ? 1 : 0) 
+        + (('variantCategories' in data) ? 1 : 0) 
+        + (('type' in data) ? 1 : 0)
+        + (('originalName' in data) ? 1 : 0)
+        + (('linkedMuscles' in data) ? 1 : 0)
+        + (('linkedGroups' in data) ? 1 : 0)
+        + (('customFields' in data) ? 1 : 0)
+        + (('invertWeight' in data) ? 1 : 0)
+        + (('invertBaseWeight' in data) ? 1 : 0)
+        + (('postures' in data) ? 1 : 0);
+      let hasOnlyAllowed = data.keys().size() == expectedSize;
+      
+      let typesValid = data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+                       data.exercise is string && data.exercise.size() > 0 && data.exercise.size() <= 100 &&
+                       data.baseWeightLbs is number &&
+                       data.baseWeightKg is number &&
+                       data.createdAt is timestamp &&
+                       data.updatedAt is timestamp;
+                       
+      let optionalValid = (!('brand' in data) || data.brand == null || (data.brand is string && data.brand.size() <= 100)) &&
+                          (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 100)) &&
+                          (!('variantCategories' in data) || data.variantCategories == null || (data.variantCategories is map)) &&
+                          (!('type' in data) || data.type == null || (data.type is string && data.type.size() <= 50)) &&
+                          (!('originalName' in data) || data.originalName == null || (data.originalName is string)) &&
+                          (!('linkedMuscles' in data) || data.linkedMuscles == null || (data.linkedMuscles is list)) &&
+                          (!('linkedGroups' in data) || data.linkedGroups == null || (data.linkedGroups is list)) &&
+                          (!('customFields' in data) || data.customFields == null || (data.customFields is list)) &&
+                          (!('invertWeight' in data) || data.invertWeight == null || (data.invertWeight is bool)) &&
+                          (!('invertBaseWeight' in data) || data.invertBaseWeight == null || (data.invertBaseWeight is bool)) &&
+                          (!('postures' in data) || data.postures == null || (data.postures is list));
+                       
+      return hasRequired && typesValid && optionalValid && data.userId == request.auth.uid;
+    }
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if (isOwner(userId) && incoming().uid == userId) || isAdmin();
+    }
+    
+    match /users/{userId}/workoutSets/{setId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
+      
+      allow create: if (isOwner(userId)
+                    && isValidId(setId)
+                    && isValidWorkoutSet(incoming())
+                    && incoming().createdAt == request.time
+                    && incoming().updatedAt == request.time) || isAdmin();
+                    
+      allow update: if (isOwner(userId)
+                    && isValidId(setId)
+                    && isValidWorkoutSet(incoming())
+                    && incoming().createdAt == existing().createdAt
+                    && incoming().updatedAt == request.time
+                    && incoming().userId == existing().userId
+                    && incoming().diff(existing()).affectedKeys().hasOnly([
+                      'exercise', 'date', 'reps', 'weightLbs', 'weightKg', 'degrees', 'variant', 'updatedAt'
+                    ])) || isAdmin();
+    }
+
+    match /users/{userId}/machineConfigs/{configId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+
+    match /globalMachineTemplates/{templateId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /appConfig/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /system_error_logs/{logId} {
+      allow read, list: if isAdmin();
+      allow create: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /bug_reports/{reportId} {
+      allow read, list: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /test/{testId} {
+      allow read: if isValidId(testId);
+    }
+  }
+}

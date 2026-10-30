@@ -1,0 +1,18 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Large binaries and builds
+jdk-21.0.2/
+openjdk-*
+public/models/*.jpg
+release.keystore
+keystore_b64.txt
+android/.gradle/
+android/app/build/
+android/capacitor-cordova-android-plugins/

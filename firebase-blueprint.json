@@ -1,0 +1,271 @@
+{
+  "entities": {
+    "workoutSet": {
+      "title": "Workout Set",
+      "description": "A single set of an exercise performed by a user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "User ID of the person performing the set."
+        },
+        "exercise": {
+          "type": "string",
+          "description": "Name of the exercise"
+        },
+        "date": {
+          "type": "timestamp",
+          "description": "Date of the set"
+        },
+        "reps": {
+          "type": "number",
+          "description": "Number of repetitions"
+        },
+        "weightLbs": {
+          "type": "number",
+          "description": "Weight in lbs"
+        },
+        "weightKg": {
+          "type": "number",
+          "description": "Weight in kg"
+        },
+        "degrees": {
+          "type": "number",
+          "description": "Degrees (optional for certain exercises)"
+        },
+        "variant": {
+          "type": "string",
+          "description": "Optional sub-exercise or variation name for this machine"
+        },
+        "createdAt": {
+          "type": "timestamp"
+        },
+        "updatedAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["userId", "exercise", "date", "reps", "weightLbs", "weightKg", "createdAt", "updatedAt"]
+    },
+    "machineConfig": {
+      "title": "Machine Config",
+      "description": "Default configuration for a specific exercise machine, such as custom baseline weight.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "exercise": {
+          "type": "string"
+        },
+        "baseWeightLbs": {
+          "type": "number"
+        },
+        "baseWeightKg": {
+          "type": "number"
+        },
+        "brand": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "variantCategories": {
+          "type": "object"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Machine", "Exercise"]
+        },
+        "createdAt": {
+          "type": "timestamp"
+        },
+        "updatedAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["userId", "exercise", "baseWeightLbs", "baseWeightKg", "createdAt", "updatedAt"]
+    },
+    "globalMachineTemplate": {
+      "title": "Global Machine Template",
+      "description": "Global exercise machine template shared across the application.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "baseWeightLbs": {
+          "type": "number"
+        },
+        "baseWeightKg": {
+          "type": "number"
+        },
+        "brand": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["Machine", "Weightlifting", "Exercise"]
+        },
+        "restSeconds": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "timestamp"
+        },
+        "updatedAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["name", "category", "baseWeightLbs", "baseWeightKg", "type"]
+    },
+    "appConfig": {
+      "title": "App Configuration",
+      "description": "System-wide app configuration and feature flags.",
+      "type": "object",
+      "properties": {
+        "features": {
+          "type": "object"
+        },
+        "announcement": {
+          "type": "object"
+        },
+        "defaults": {
+          "type": "object"
+        },
+        "updatedAt": {
+          "type": "timestamp"
+        },
+        "updatedBy": {
+          "type": "string"
+        }
+      }
+    },
+    "systemErrorLog": {
+      "title": "System Error Log",
+      "description": "Error telemetry logged per session with 7-day TTL retention.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionStartTime": {
+          "type": "number"
+        },
+        "type": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "stack": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "timestamp"
+        },
+        "expiresAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["sessionId", "type", "source", "message", "createdAt"]
+    },
+    "bugReport": {
+      "title": "Bug Report",
+      "description": "User-submitted bug report containing error logs and system state.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "userEmail": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "errorConditionLogs": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "timestamp"
+        }
+      },
+      "required": ["title", "description", "status", "createdAt"]
+    },
+    "testConnection": {
+      "title": "Test Connection",
+      "description": "Connection test document to validate Firestore backend connectivity",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "test/{testId}": {
+      "schema": {
+        "$ref": "#/entities/testConnection"
+      },
+      "description": "Health check document to validate Firestore backend connectivity on boot"
+    },
+    "users/{userId}/workoutSets/{setId}": {
+      "schema": {
+        "$ref": "#/entities/workoutSet"
+      },
+      "description": "Stores user workout sets"
+    },
+    "users/{userId}/machineConfigs/{configId}": {
+      "schema": {
+        "$ref": "#/entities/machineConfig"
+      },
+      "description": "Stores user custom machine configurations"
+    },
+    "globalMachineTemplates/{templateId}": {
+      "schema": {
+        "$ref": "#/entities/globalMachineTemplate"
+      },
+      "description": "Global machine templates managed by administrators"
+    },
+    "appConfig/{configId}": {
+      "schema": {
+        "$ref": "#/entities/appConfig"
+      },
+      "description": "Global app configuration and feature flags"
+    },
+    "system_error_logs/{logId}": {
+      "schema": {
+        "$ref": "#/entities/systemErrorLog"
+      },
+      "description": "Runtime errors and session telemetry logs (deleted after 7 days)"
+    },
+    "bug_reports/{reportId}": {
+      "schema": {
+        "$ref": "#/entities/bugReport"
+      },
+      "description": "Bug reports filed by users with condition logs"
+    }
+  }
+}

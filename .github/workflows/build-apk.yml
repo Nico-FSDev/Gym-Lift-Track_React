@@ -1,0 +1,274 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: |
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+      
+      - name: Lint TypeScript
+        run: npm run lint
+      
+      - name: Build web app
+        run: npm run build 2>&1 | tee build-output.log
+      
+      - name: Upload Web Build Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build-logs
+          path: build-output.log
+          retention-days: 7
+      
+      - name: Setup Java (JDK 21 Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 platforms;android-36 build-tools;35.0.0 build-tools;36.0.0'
+          accept-android-sdk-licenses: true
+
+      - name: Ensure Android SDK Licenses
+        run: |
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo -e "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n8933bad161af4178b1185d1a37fbf41ea5269c55" > "$ANDROID_HOME/licenses/android-sdk-license"
+          echo -e "84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          echo -e "601085b94cd77f0b54ff8640695709915000853d" > "$ANDROID_HOME/licenses/android-googletv-license"
+          echo -e "33b6a2b64920400829152f320ac458c648003d66" > "$ANDROID_HOME/licenses/google-gdk-license"
+      
+      - name: Create android directory if not exists
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+      
+      - name: Sync Capacitor to Android
+        run: npx cap sync android
+
+      - name: Auto-generate launcher icons from public/icon.png
+        run: |
+          # Ensure public/icon.png exists from source
+          if [ ! -f "public/icon.png" ] && [ -f "public/Gym-Lift-Track_Icon.png" ]; then
+            cp public/Gym-Lift-Track_Icon.png public/icon.png
+          fi
+
+          # Purge any conflicting webp files
+          find android/app/src/main/res -name "ic_launcher*.webp" -delete || true
+
+          # Generate clean PNG icons using dedicated sharp script
+          if [ -f "generate_app_icons.cjs" ]; then
+            node generate_app_icons.cjs
+          fi
+
+      - name: Update Android Version
+        run: |
+          VERSION_CODE=${{ github.run_number }}
+          VERSION_NAME="1.0.${{ github.run_number }}"
+          echo "Building Gym Lift Track APK Version: $VERSION_NAME (Code: $VERSION_CODE)"
+          echo "APK_VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          sed -i -e "s/versionCode [0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
+          sed -i -e "s/versionName \".*\"/versionName \"$VERSION_NAME\"/" android/app/build.gradle
+      
+      - name: Setup Gradle Wrapper and Repair (Gradle 8.14.3)
+        run: |
+          cd android
+          if [ ! -f "gradlew" ] || ! ./gradlew -v > /dev/null 2>&1; then
+            echo "Repairing Gradle wrapper with Gradle 8.14.3..."
+            gradle wrapper --gradle-version 8.14.3 || true
+          fi
+          # Ensure Gradle wrapper distribution points to 8.14.3
+          if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+            sed -i -e 's/gradle-.*-bin.zip/gradle-8.14.3-bin.zip/' gradle/wrapper/gradle-wrapper.properties || true
+          fi
+          chmod +x gradlew
+          cd ..
+
+      - name: Setup Android Debug Keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          DEBUG_KS="android/app/debug.keystore"
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Using custom debug keystore from DEBUG_KEYSTORE_BASE64 secret..."
+            echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$DEBUG_KS"
+          elif [ -f "$DEBUG_KS" ]; then
+            echo "Using persistent debug.keystore from repository..."
+          else
+            echo "Creating persistent debug.keystore in android/app..."
+            keytool -genkey -v -keystore "$DEBUG_KS" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          # Ensure Gradle and keytool find it in user directory as well
+          mkdir -p ~/.android
+          cp -f "$DEBUG_KS" ~/.android/debug.keystore
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          set -o pipefail
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../gradle-debug.log
+          cd ..
+
+      - name: Build Release APK
+        run: |
+          cd android
+          set -o pipefail
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee ../gradle-release.log
+          cd ..
+
+      - name: Capture Gradle Build Failure
+        if: failure()
+        run: |
+          echo "## ❌ Gradle Build Failure Details" >> $GITHUB_STEP_SUMMARY
+          if [ -f "gradle-debug.log" ]; then
+            echo "### Debug Build Log (last 60 lines):" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 60 gradle-debug.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f "gradle-release.log" ]; then
+            echo "### Release Build Log (last 60 lines):" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 60 gradle-release.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Sign Release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'releasekey' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'androidpassword' }}
+        run: |
+          RELEASE_DIR="android/app/build/outputs/apk/release"
+          if [ -d "$RELEASE_DIR" ]; then
+            cd "$RELEASE_DIR"
+            UNSIGNED_APK=$(find . -name "*-unsigned.apk" -o -name "app-release.apk" | head -n 1)
+            
+            if [ -n "$UNSIGNED_APK" ]; then
+              BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
+              
+              if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+                echo "Decoding production keystore from ANDROID_KEYSTORE_BASE64..."
+                echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > release.keystore
+                SIGN_KEYSTORE="release.keystore"
+                SIGN_ALIAS="$KEY_ALIAS"
+                SIGN_PASS="$KEYSTORE_PASSWORD"
+              else
+                echo "Using standard project keystore (matching Firebase SHA-1)..."
+                SIGN_KEYSTORE="../../../../android/app/debug.keystore"
+                if [ ! -f "$SIGN_KEYSTORE" ]; then
+                  SIGN_KEYSTORE="$HOME/.android/debug.keystore"
+                fi
+                SIGN_ALIAS="androiddebugkey"
+                SIGN_PASS="android"
+              fi
+              
+              $BUILD_TOOLS_DIR/zipalign -v -p 4 "$UNSIGNED_APK" app-release-aligned.apk || cp "$UNSIGNED_APK" app-release-aligned.apk
+              $BUILD_TOOLS_DIR/apksigner sign --ks "$SIGN_KEYSTORE" --ks-key-alias "$SIGN_ALIAS" --ks-pass "pass:$SIGN_PASS" --key-pass "pass:$SIGN_PASS" --out app-release-signed.apk app-release-aligned.apk
+              cp app-release-signed.apk "app-release-GLT-${APK_VERSION_NAME}.apk"
+            fi
+          else
+            echo "Release APK directory not found, skipping signing."
+          fi
+        continue-on-error: true
+
+      - name: Verify and Print APK Fingerprints for Firebase
+        if: always()
+        run: |
+          DEBUG_APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK=$(find android/app/build/outputs/apk/release -name "app-release-GLT-*.apk" -o -name "app-release-signed.apk" | head -n 1)
+
+          echo "## 🔑 Firebase Google Sign-In Fingerprints (SHA-1 & SHA-256)" >> $GITHUB_STEP_SUMMARY
+          echo "Add these fingerprints to **Firebase Console > Project Settings > Your apps > Android app (\`com.gym.lift.track\`)**." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Package Name** | \`com.gym.lift.track\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Web Client ID (serverClientId)** | \`40150413250-b37nnttausajrvv4fccf8bmfnl1eoc92.apps.googleusercontent.com\` |" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$DEBUG_APK" ]; then
+            BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
+            DEBUG_SHA1=$($BUILD_TOOLS_DIR/apksigner verify --print-certs "$DEBUG_APK" 2>/dev/null | grep "certificate SHA-1 digest:" | head -1 | awk '{print $NF}')
+            DEBUG_SHA256=$($BUILD_TOOLS_DIR/apksigner verify --print-certs "$DEBUG_APK" 2>/dev/null | grep "certificate SHA-256 digest:" | head -1 | awk '{print $NF}')
+            
+            if [ -z "$DEBUG_SHA1" ] && [ -f "android/app/debug.keystore" ]; then
+              DEBUG_SHA1=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android | grep "SHA1:" | head -1 | awk '{print $2}')
+              DEBUG_SHA256=$(keytool -list -v -keystore android/app/debug.keystore -alias androiddebugkey -storepass android | grep "SHA256:" | head -1 | awk '{print $2}')
+            fi
+
+            echo "| **Debug APK SHA-1** | \`$DEBUG_SHA1\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Debug APK SHA-256** | \`$DEBUG_SHA256\` |" >> $GITHUB_STEP_SUMMARY
+            echo "Debug SHA-1: $DEBUG_SHA1"
+            echo "Debug SHA-256: $DEBUG_SHA256"
+          fi
+
+          if [ -n "$RELEASE_APK" ] && [ -f "$RELEASE_APK" ]; then
+            RELEASE_SHA1=$(keytool -printcert -jarfile "$RELEASE_APK" | grep "SHA1:" | head -1 | awk '{print $2}')
+            RELEASE_SHA256=$(keytool -printcert -jarfile "$RELEASE_APK" | grep "SHA256:" | head -1 | awk '{print $2}')
+            echo "| **Release APK SHA-1** | \`$RELEASE_SHA1\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Release APK SHA-256** | \`$RELEASE_SHA256\` |" >> $GITHUB_STEP_SUMMARY
+            echo "Release SHA-1: $RELEASE_SHA1"
+            echo "Release SHA-256: $RELEASE_SHA256"
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> 💡 **Important:** If you test using \`app-debug.apk\`, add the **Debug APK SHA-1**. If you test using \`app-release-GLT\`, add the **Release APK SHA-1**. Adding both ensures Google Sign-In works on all builds." >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-release-GLT
+          path: |
+            android/app/build/outputs/apk/release/app-release-GLT-*.apk
+            android/app/build/outputs/apk/release/app-release-signed.apk
+            android/app/build/outputs/apk/release/*-unsigned.apk
+          retention-days: 30
+          if-no-files-found: warn
+        continue-on-error: true
+      
+      - name: Upload Build Logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-logs
+          path: |
+            android/gradle-debug-output.log
+            android/gradle-release-output.log
+            android/build/reports/
+            android/app/build/reports/
+            android/app/build/outputs/
+            build-output.log
+          retention-days: 7
+          if-no-files-found: warn
